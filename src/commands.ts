@@ -17,24 +17,23 @@ export function formatStatus(instance: McsInstance, node?: McsNodeStatus) {
     `实例：${instance.name}`,
     `状态：${formatStatusWord(instance.status)}`,
   ]
-  if (instance.version) rows.push(`版本：${instance.version}`)
-  if (instance.currentPlayers !== undefined && instance.maxPlayers !== undefined && instance.maxPlayers > 0) {
-    rows.push(`人数：${instance.currentPlayers}/${instance.maxPlayers}`)
-  }
-  if (instance.address) rows.push(`地址：${instance.address}`)
-  if (instance.process?.pid) rows.push(`进程：PID ${instance.process.pid}`)
-  if (instance.process?.cpu !== undefined || instance.process?.memory !== undefined) {
-    rows.push(`资源：${instance.process.cpu !== undefined ? `CPU ${instance.process.cpu.toFixed(2)}%` : 'CPU 未知'} / ${instance.process.memory !== undefined ? `内存 ${formatMemory(instance.process.memory)}` : '内存 未知'}`)
-  }
-  if (instance.process?.elapsed) rows.push(`运行：${formatDuration(instance.process.elapsed)}`)
-  if (node) rows.push(`节点：${node.available ? '在线' : '离线'}${node.address ? ` ${node.address}` : ''}`)
-  if (node?.version) rows.push(`节点版本：${node.version}`)
-  if (node?.hostname) rows.push(`节点主机：${node.hostname}`)
-  if (node?.runningInstances !== undefined && node.totalInstances !== undefined) rows.push(`节点实例：${node.runningInstances}/${node.totalInstances}`)
+  rows.push(`在线人数：${instance.currentPlayers ?? 0}/${instance.maxPlayers ?? 0}`)
+  rows.push(`在线玩家：${instance.onlinePlayers?.length ? instance.onlinePlayers.join('，') : '无'}`)
   if (node?.cpuUsage !== undefined || node?.memoryUsage !== undefined) {
     rows.push(`节点资源：${node.cpuUsage !== undefined ? `CPU ${node.cpuUsage.toFixed(2)}%` : 'CPU 未知'} / ${node.memoryUsage !== undefined ? `内存 ${node.memoryUsage.toFixed(2)}%` : '内存 未知'}`)
   }
   return rows.join('\n')
+}
+
+export function parseListPlayers(log: string) {
+  const line = log.split('\n').reverse().find((item) => /There are \d+ of a max of \d+ players online:/i.test(item))
+  const match = line?.match(/There are (\d+) of a max of (\d+) players online:\s*(.*)$/i)
+  if (!match) return undefined
+  return {
+    currentPlayers: Number(match[1]),
+    maxPlayers: Number(match[2]),
+    onlinePlayers: match[3].split(/[,，]/).map((item) => item.trim()).filter(Boolean),
+  }
 }
 
 export function buildMinecraftCommand(kind: 'exec' | 'say' | 'whitelist' | 'op', args: string[]) {
@@ -129,7 +128,17 @@ export function registerCommands(ctx: Context, client: McsManagerClient, state: 
       if (!session || !requireAllowed(session)) return '无权使用此指令。'
       const active = getActive(session)
       if (!active) return '请先执行 mc.list，再用 mc.use <序号> 选择实例。'
-      return formatStatus(await client.getInstance(active.uuid), await client.getNodeStatus())
+      const instance = await client.getInstance(active.uuid)
+      if (instance.status === 3) {
+        const before = await client.getLog(active.uuid, 200)
+        const result = await client.sendCommand(active.uuid, 'list')
+        if (result.ok) {
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          const players = parseListPlayers(await client.getNewLog(active.uuid, before, 'list', 5))
+          if (players) Object.assign(instance, players)
+        }
+      }
+      return formatStatus(instance, await client.getNodeStatus())
     })
 
   ctx.command('mc.log [lines:number]', '查看当前实例日志')
@@ -220,7 +229,8 @@ function hasName(names: string[], name: string) {
   return names.some((item) => item.toLowerCase() === name.toLowerCase())
 }
 
-export function getSessionKey(session: Pick<Session, 'platform' | 'guildId' | 'channelId' | 'userId'>) {
+export function getSessionKey(session: Pick<Session, 'platform' | 'guildId' | 'channelId' | 'userId' | 'isDirect'>) {
+  if (session.isDirect || (!session.guildId && session.channelId?.startsWith('private:'))) return `${session.platform}:private:${session.userId}`
   if (session.guildId) return `${session.platform}:group:${session.guildId}`
   if (session.channelId && session.channelId !== session.userId) return `${session.platform}:guild:${session.channelId}`
   return `${session.platform}:private:${session.userId}`
@@ -234,17 +244,4 @@ function formatStatusWord(status: number) {
   if (status === 3) return '运行'
   if (status === 0) return '未运行'
   return `状态${status}`
-}
-
-function formatMemory(value: number) {
-  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} GB`
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} MB`
-  return `${value} KB`
-}
-
-function formatDuration(value: number) {
-  const hours = Math.floor(value / 3600)
-  const minutes = Math.floor((value % 3600) / 60)
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutes}m`
 }

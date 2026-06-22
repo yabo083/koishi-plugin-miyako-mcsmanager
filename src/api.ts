@@ -13,6 +13,7 @@ export interface McsInstance {
   version?: string
   currentPlayers?: number
   maxPlayers?: number
+  onlinePlayers?: string[]
   address?: string
   process?: McsProcessInfo
 }
@@ -134,22 +135,17 @@ export function createMcsManagerClient(options: McsManagerClientOptions): McsMan
     },
 
     async getLog(uuid, lines) {
-      const url = `${baseUrl}/api/protected_instance/outputlog?${commonQuery(uuid)}`
-      const response = await options.httpGet(url)
-      if (response?.status !== 200) return ''
-      return tailLines(stripAnsi(String(response.data ?? '')), lines)
+      return tailLines(await readLog(uuid), lines)
     },
 
     async getNewLog(uuid, before, command, lines) {
-      const url = `${baseUrl}/api/protected_instance/outputlog?${commonQuery(uuid)}`
-      const response = await options.httpGet(url)
-      if (response?.status !== 200) return ''
-      const current = stripAnsi(String(response.data ?? ''))
+      const current = await readLog(uuid)
       const beforeIndex = before ? current.lastIndexOf(before) : -1
+      if (before && beforeIndex < 0) return ''
       const next = beforeIndex >= 0 ? current.slice(beforeIndex + before.length) : current
       return tailLines(next.split('\n').filter((line) => {
         const trimmed = line.trim()
-        return trimmed && trimmed !== '>' && trimmed !== `> ${command}` && trimmed !== command
+        return trimmed && trimmed !== `> ${command}` && trimmed !== command
       }).join('\n'), lines)
     },
 
@@ -176,6 +172,23 @@ export function createMcsManagerClient(options: McsManagerClientOptions): McsMan
         players,
       }
     },
+  }
+
+  async function readLog(uuid: string) {
+    if (options.httpPut) {
+      const fileContent = await readFileContent(uuid, 'logs/latest.log')
+      if (fileContent) return cleanLogLines(stripAnsi(fileContent))
+    }
+    const url = `${baseUrl}/api/protected_instance/outputlog?${commonQuery(uuid)}`
+    const response = await options.httpGet(url)
+    if (response?.status !== 200) return ''
+    return cleanLogLines(stripAnsi(String(response.data ?? '')))
+  }
+
+  async function readFileContent(uuid: string, target: string) {
+    const url = `${baseUrl}/api/files?${commonQuery(uuid)}`
+    const response = await options.httpPut!(url, { target })
+    return response?.status === 200 ? String(response.data ?? '') : ''
   }
 }
 
@@ -211,6 +224,20 @@ function stripAnsi(value: string) {
     .join('\n')
 }
 
+function cleanLogLines(value: string) {
+  return value.split('\n').filter((line) => {
+    const trimmed = line.trim()
+    return trimmed && trimmed !== '>' && !trimmed.includes('instantaneous output content is too long')
+  }).map(normalizeLogTimestamp).join('\n')
+}
+
+function normalizeLogTimestamp(line: string) {
+  return line.replace(/^\[(\d{2})(\d{1,2})月(\d{4}) (\d{2}:\d{2}:\d{2}\.\d{3})\]/, (_match, day: string, month: string, year: string, time: string) => {
+    return `[${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${time}]`
+  })
+}
+
 function tailLines(value: string, lines: number) {
+  if (!value) return ''
   return value.split('\n').slice(-lines).join('\n')
 }

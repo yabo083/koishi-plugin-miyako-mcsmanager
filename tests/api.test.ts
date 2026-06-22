@@ -110,6 +110,59 @@ async function testGetLogStripsAnsiAndReturnsTail() {
   assert.equal(log, 'line2\nline3')
 }
 
+async function testGetLogOmitsMcsmanagerLongOutputSentinel() {
+  const client = createMcsManagerClient({
+    baseUrl: 'http://panel.local',
+    remoteUuid: 'daemon-1',
+    apiKey: 'secret',
+    httpGet: async () => ({
+      status: 200,
+      data: '[MCSMANAGER] The instantaneous output content is too long and has been rejected.\n[03:29:46] latest line\n>',
+    }),
+  })
+
+  const log = await client.getLog('uuid-1', 5)
+
+  assert.equal(log, '[03:29:46] latest line')
+}
+
+async function testGetLogPrefersLatestLogFileOverRejectedOutputlog() {
+  const client = createMcsManagerClient({
+    baseUrl: 'http://panel.local',
+    remoteUuid: 'daemon-1',
+    apiKey: 'secret',
+    httpGet: async () => ({
+      status: 200,
+      data: '[MCSMANAGER] The instantaneous output content is too long and has been rejected.',
+    }),
+    httpPut: async (_url, data) => {
+      assert.deepEqual(data, { target: 'logs/latest.log' })
+      return { status: 200, data: 'old line\n[03:29:46] real latest line' }
+    },
+  })
+
+  const log = await client.getLog('uuid-1', 1)
+
+  assert.equal(log, '[03:29:46] real latest line')
+}
+
+async function testGetLogNormalizesMinecraftChineseTimestamp() {
+  const client = createMcsManagerClient({
+    baseUrl: 'http://panel.local',
+    remoteUuid: 'daemon-1',
+    apiKey: 'secret',
+    httpGet: async () => ({ status: 200, data: '' }),
+    httpPut: async () => ({
+      status: 200,
+      data: '[236月2026 06:20:13.683] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: [Not Secure]',
+    }),
+  })
+
+  const log = await client.getLog('uuid-1', 1)
+
+  assert.equal(log, '[2026-06-23 06:20:13.683] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: [Not Secure]')
+}
+
 async function testReadsInstanceFileContent() {
   let requested = ''
   let body: unknown
@@ -226,6 +279,42 @@ async function testExtractsNewLogStripsConsolePromptEscapes() {
   assert.equal(log, '[03:29:46] [Server thread/INFO] [minecraft/MinecraftServer]: There are 0 of a max of 20 players online: ')
 }
 
+async function testGetNewLogDoesNotReturnFullLogWhenSnapshotMissing() {
+  const client = createMcsManagerClient({
+    baseUrl: 'http://panel.local',
+    remoteUuid: 'daemon-1',
+    apiKey: 'secret',
+    httpGet: async () => ({
+      status: 200,
+      data: 'startup line\nold unrelated line\n[03:29:46] unrelated latest line',
+    }),
+  })
+
+  const log = await client.getNewLog('uuid-1', 'old tail line that disappeared', 'say hello', 5)
+
+  assert.equal(log, '')
+}
+
+async function testGetNewLogPrefersLatestLogFileAndKeepsCommandOutput() {
+  const client = createMcsManagerClient({
+    baseUrl: 'http://panel.local',
+    remoteUuid: 'daemon-1',
+    apiKey: 'secret',
+    httpGet: async () => ({
+      status: 200,
+      data: '[MCSMANAGER] The instantaneous output content is too long and has been rejected.',
+    }),
+    httpPut: async (_url, data) => {
+      assert.deepEqual(data, { target: 'logs/latest.log' })
+      return { status: 200, data: 'old tail line\n[03:29:46] [Server thread/INFO] [minecraft/MinecraftServer]: [Server] hi' }
+    },
+  })
+
+  const log = await client.getNewLog('uuid-1', 'old tail line', 'say hi', 5)
+
+  assert.equal(log, '[03:29:46] [Server thread/INFO] [minecraft/MinecraftServer]: [Server] hi')
+}
+
 async function testGetInstanceUsesDetailEndpoint() {
   let requested = ''
   const client = createMcsManagerClient({
@@ -332,12 +421,17 @@ async function main() {
   await testListInstancesFallsBackToMcsmanager10Endpoint()
   await testSendCommandEncodesMinecraftCommand()
   await testGetLogStripsAnsiAndReturnsTail()
+  await testGetLogOmitsMcsmanagerLongOutputSentinel()
+  await testGetLogPrefersLatestLogFileOverRejectedOutputlog()
+  await testGetLogNormalizesMinecraftChineseTimestamp()
   await testReadsInstanceFileContent()
   await testParsesOpsJsonFromInstanceFile()
   await testParsesWhitelistFilesFromInstance()
   await testExtractsNewLogAfterCommand()
   await testExtractsNewLogAfterTailSnapshot()
   await testExtractsNewLogStripsConsolePromptEscapes()
+  await testGetNewLogDoesNotReturnFullLogWhenSnapshotMissing()
+  await testGetNewLogPrefersLatestLogFileAndKeepsCommandOutput()
   await testGetInstanceUsesDetailEndpoint()
   await testGetNodeStatusUsesRemoteServicesEndpoint()
   await testControlInstanceUsesLifecycleEndpoint()

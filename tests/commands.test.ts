@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import type { McsManagerClient } from '../src/api'
-import { buildMinecraftCommand, formatInstanceList, formatNativeCommandResult, formatOps, formatStatus, formatWhitelist, getNativeCommandUsage, isFileBackedQuery, registerCommands } from '../src/commands'
+import { buildMinecraftCommand, formatInstanceList, formatNativeCommandResult, formatOps, formatStatus, formatWhitelist, getNativeCommandUsage, getSessionKey, isFileBackedQuery, parseListPlayers, registerCommands } from '../src/commands'
 import { createNamespaceState } from '../src/state'
 
 function testFormatsNumberedInstanceList() {
@@ -29,14 +29,14 @@ function testFormatsAccurateStatus() {
     },
   })
 
-  assert.equal(output, '实例：Beta\n状态：运行\n版本：1.20.1\n人数：2/10\n地址：127.0.0.1:25565\n进程：PID 3651814\n资源：CPU 1.50% / 内存 1.6 GB\n运行：1h 1m')
+  assert.equal(output, '实例：Beta\n状态：运行\n在线人数：2/10\n在线玩家：无')
 }
 
-function testOmitsInvalidPlayerLimitAndFormatsNodeStatus() {
+function testFormatsStatusWithNodeOnly() {
   const output = formatStatus({
     uuid: 'uuid-b',
-    name: 'Beta',
-    status: 3,
+    name: 'No Flesh Within Chest 0.3.2',
+    status: 0,
     currentPlayers: 0,
     maxPlayers: 0,
     address: '127.0.0.1:25565',
@@ -45,13 +45,43 @@ function testOmitsInvalidPlayerLimitAndFormatsNodeStatus() {
     address: 'localhost:24444',
     version: '4.11.0',
     hostname: 'BREN9NP',
-    runningInstances: 1,
+    runningInstances: 0,
     totalInstances: 1,
-    cpuUsage: 2.38,
-    memoryUsage: 66.55,
+    cpuUsage: 3.36,
+    memoryUsage: 25.95,
   })
 
-  assert.equal(output, '实例：Beta\n状态：运行\n地址：127.0.0.1:25565\n节点：在线 localhost:24444\n节点版本：4.11.0\n节点主机：BREN9NP\n节点实例：1/1\n节点资源：CPU 2.38% / 内存 66.55%')
+  assert.equal(output, '实例：No Flesh Within Chest 0.3.2\n状态：未运行\n在线人数：0/0\n在线玩家：无\n节点资源：CPU 3.36% / 内存 25.95%')
+}
+
+function testFormatsStatusWithOnlinePlayers() {
+  const output = formatStatus({
+    uuid: 'uuid-b',
+    name: 'No Flesh Within Chest 0.3.2',
+    status: 3,
+    currentPlayers: 2,
+    maxPlayers: 20,
+    onlinePlayers: ['Steve', 'Alex'],
+  }, {
+    available: true,
+    cpuUsage: 3.01,
+    memoryUsage: 67.87,
+  })
+
+  assert.equal(output, '实例：No Flesh Within Chest 0.3.2\n状态：运行\n在线人数：2/20\n在线玩家：Steve，Alex\n节点资源：CPU 3.01% / 内存 67.87%')
+}
+
+function testParsesListPlayersOutput() {
+  assert.deepEqual(parseListPlayers('There are 2 of a max of 20 players online: Steve, Alex'), {
+    currentPlayers: 2,
+    maxPlayers: 20,
+    onlinePlayers: ['Steve', 'Alex'],
+  })
+  assert.deepEqual(parseListPlayers('There are 0 of a max of 20 players online: '), {
+    currentPlayers: 0,
+    maxPlayers: 20,
+    onlinePlayers: [],
+  })
 }
 
 function testBuildsNativeMinecraftCommands() {
@@ -105,6 +135,16 @@ function testFormatsOpsFromFile() {
 function testFormatsWhitelistFromFiles() {
   assert.equal(formatWhitelist({ enabled: true, enforced: false, players: ['Steve'] }), '白名单：开启\n强制白名单：关闭\n玩家：Steve')
   assert.equal(formatWhitelist({ enabled: false, enforced: false, players: [] }), '白名单：关闭\n强制白名单：关闭\n玩家：空')
+}
+
+function testPrivateChannelSessionKeyUsesUserId() {
+  const key = getSessionKey({
+    platform: 'onebot',
+    userId: '2058561180',
+    channelId: 'private:2058561180',
+  })
+
+  assert.equal(key, 'onebot:private:2058561180')
 }
 
 async function testOpListReadsFileAndDoesNotSendConsoleCommand() {
@@ -201,6 +241,30 @@ async function testWhitelistMutationReadsFileAfterSendingCommand() {
   assert.equal(output, '【实例】No Flesh Within Chest 0.3.2\n【实际执行指令】whitelist add miyakko_de\n【白名单】开启\n【强制白名单】关闭\n【最新白名单玩家】AIzhang2025, miyakko_de, LaoLiangZai')
 }
 
+async function testStatusCommandRefreshesPlayersWithListCommand() {
+  const { actions, ctx } = createCommandHarness()
+  const state = createNamespaceState()
+  state.setInstances('onebot:group:1000', [{ uuid: 'uuid-1', name: 'No Flesh Within Chest 0.3.2', status: 3 }])
+  state.selectInstance('onebot:group:1000', 1)
+  const sent: string[] = []
+  const client = createClientStub({
+    getInstance: async () => ({ uuid: 'uuid-1', name: 'No Flesh Within Chest 0.3.2', status: 3 }),
+    getNodeStatus: async () => ({ available: true, cpuUsage: 3.01, memoryUsage: 67.87 }),
+    sendCommand: async (_uuid, command) => {
+      sent.push(command)
+      return { ok: true }
+    },
+    getLog: async () => 'old tail line',
+    getNewLog: async () => 'There are 2 of a max of 20 players online: Steve, Alex',
+  })
+
+  registerCommands(ctx, client, state, () => true)
+  const output = await actions.get('mc.status')!({ session: groupSession })
+
+  assert.deepEqual(sent, ['list'])
+  assert.equal(output, '实例：No Flesh Within Chest 0.3.2\n状态：运行\n在线人数：2/20\n在线玩家：Steve，Alex\n节点资源：CPU 3.01% / 内存 67.87%')
+}
+
 type CommandAction = (argv: { session: typeof groupSession }, raw?: string) => unknown
 
 const groupSession = {
@@ -247,7 +311,9 @@ function createClientStub(overrides: Partial<McsManagerClient>): McsManagerClien
 async function main() {
   testFormatsNumberedInstanceList()
   testFormatsAccurateStatus()
-  testOmitsInvalidPlayerLimitAndFormatsNodeStatus()
+  testFormatsStatusWithNodeOnly()
+  testFormatsStatusWithOnlinePlayers()
+  testParsesListPlayersOutput()
   testBuildsNativeMinecraftCommands()
   testRejectsInvalidNativeMinecraftCommands()
   testShowsNativeCommandUsage()
@@ -255,10 +321,12 @@ async function main() {
   testFormatsNativeCommandResult()
   testFormatsOpsFromFile()
   testFormatsWhitelistFromFiles()
+  testPrivateChannelSessionKeyUsesUserId()
   await testOpListReadsFileAndDoesNotSendConsoleCommand()
   await testWhitelistListReadsFileAndDoesNotSendConsoleCommand()
   await testOpMutationReadsFileAfterSendingCommand()
   await testWhitelistMutationReadsFileAfterSendingCommand()
+  await testStatusCommandRefreshesPlayersWithListCommand()
 }
 
 main().catch((error) => {
