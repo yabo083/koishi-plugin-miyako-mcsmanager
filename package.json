@@ -1,0 +1,66 @@
+{
+  "name": "koishi-plugin-miyako-mcsmanager",
+  "description": "Personal MCSManager control plugin for Koishi.",
+  "version": "0.1.0",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "miyako",
+  "homepage": "https://github.com/yabo083/koishi-plugin-miyako-mcsmanager",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yabo083/koishi-plugin-miyako-mcsmanager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yabo083/koishi-plugin-miyako-mcsmanager/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "chatbot",
+    "koishi",
+    "koishi-plugin",
+    "minecraft",
+    "mcsm",
+    "mcsmanager",
+    "miyako"
+  ],
+  "peerDependencies": {
+    "koishi": "^4.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "koishi": "^4.18.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "test:api": "tsx tests/api.test.ts",
+    "test:permissions": "tsx tests/permissions.test.ts",
+    "test:state": "tsx tests/state.test.ts",
+    "test:commands": "tsx tests/commands.test.ts",
+    "test:config": "tsx tests/config.test.ts",
+    "test:index": "tsx tests/index.test.ts",
+    "test": "npm run test:api && npm run test:permissions && npm run test:state && npm run test:commands && npm run test:config && npm run test:index",
+    "build": "tsc -p tsconfig.json",
+    "pack:check": "npm run test && npm run build && npm pack --dry-run",
+    "prepublishOnly": "npm run test && npm run build",
+    "pub": "npm run test && npm run build && npm publish --access public --provenance"
+  },
+  "koishi": {
+    "description": {
+      "en": "Control MCSManager Minecraft instances from Koishi.",
+      "zh": "通过 Koishi 控制 MCSManager Minecraft 实例。"
+    }
+  }
+}
