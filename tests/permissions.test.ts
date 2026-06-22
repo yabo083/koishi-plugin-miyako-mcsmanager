@@ -181,6 +181,44 @@ function testLegacyEntryUsesSchemaDefaults() {
   assert.equal(allowed, true)
 }
 
+function testConsoleTableNumericPrivateIdMatchesSessionId() {
+  const allowed = canUseCommand(
+    {
+      platform: 'onebot',
+      type: 'private',
+      targetId: '2058561180',
+      userId: '2058561180',
+    },
+    {
+      mode: 'whitelist',
+      entries: [
+        { platform: 'onebot', type: 'private', id: 2058561180, allowedUsers: '' } as any,
+      ],
+    },
+  )
+
+  assert.equal(allowed, true)
+}
+
+function testConsoleTableNumericAllowedUsersMatchSessionUser() {
+  const allowed = canUseCommand(
+    {
+      platform: 'onebot',
+      type: 'group',
+      targetId: '123456789',
+      userId: '2058561180',
+    },
+    {
+      mode: 'whitelist',
+      entries: [
+        { platform: 'onebot', type: 'group', id: 123456789, allowedUsers: 2058561180 } as any,
+      ],
+    },
+  )
+
+  assert.equal(allowed, true)
+}
+
 function main() {
   testWhitelistAllowsWholeGroupWhenAllowedUsersEmpty()
   testWhitelistRestrictsGroupToAllowedUsers()
@@ -191,6 +229,8 @@ function main() {
   testLegacyConfigAllowsSandboxByDefault()
   testSandboxPrefixedPlatformBypassesPermissionTable()
   testLegacyEntryUsesSchemaDefaults()
+  testConsoleTableNumericPrivateIdMatchesSessionId()
+  testConsoleTableNumericAllowedUsersMatchSessionUser()
 }
 
 main()

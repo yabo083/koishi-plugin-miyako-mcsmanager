@@ -29,11 +29,15 @@ export function canUseCommand(session: PermissionSession, config: PermissionConf
 }
 
 function matchesEntry(session: PermissionSession, entry: PermissionEntry) {
-  if ((entry.platform ?? 'onebot') !== session.platform) return false
+  if (toText(entry.platform ?? 'onebot') !== toText(session.platform)) return false
   if (entry.type !== session.type) return false
-  if (entry.id !== session.targetId) return false
+  if (toText(entry.id) !== toText(session.targetId)) return false
   if (entry.type === 'private') return true
 
-  const allowedUsers = (entry.allowedUsers ?? '').trim().split(/[\s,，]+/).filter(Boolean)
-  return allowedUsers.length === 0 || allowedUsers.includes(session.userId)
+  const allowedUsers = toText(entry.allowedUsers ?? '').trim().split(/[\s,，]+/).filter(Boolean)
+  return allowedUsers.length === 0 || allowedUsers.includes(toText(session.userId))
+}
+
+function toText(value: unknown) {
+  return String(value ?? '')
 }
